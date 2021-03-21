@@ -16,6 +16,7 @@
 package com.amazonaws.services.kinesis.samples.stocktrades.writer;
 
 
+import java.net.URI;
 import java.util.concurrent.ExecutionException;
 
 
@@ -77,10 +78,31 @@ public class StockTradesWriter {
      * @param kinesisClient Amazon Kinesis client
      * @param streamName Name of stream
      */
+
     private static void sendStockTrade(StockTrade trade, KinesisAsyncClient kinesisClient,
                                        String streamName) {
-        // TODO: Implement method
+        byte[] bytes = trade.toJsonAsBytes();
+        // The bytes could be null if there is an issue with the JSON serialization by the Jackson JSON library.
+        if (bytes == null) {
+            LOG.warn("Could not get JSON bytes for stock trade");
+            return;
+        }
+
+        LOG.info("Putting trade: " + trade.toString());
+        PutRecordRequest request = PutRecordRequest.builder()
+                .partitionKey(trade.getTickerSymbol()) // We use the ticker symbol as the partition key, explained in the Supplemental Information section below.
+                .streamName(streamName)
+                .data(SdkBytes.fromByteArray(bytes))
+                .build();
+        try {
+            kinesisClient.putRecord(request).get();
+        } catch (InterruptedException e) {
+            LOG.info("Interrupted, assuming shutdown.");
+        } catch (ExecutionException e) {
+            LOG.error("Exception while sending data to Kinesis. Will try again next cycle.", e);
+        }
     }
+
 
     public static void main(String[] args) throws Exception {
         checkUsage(args);
@@ -93,7 +115,12 @@ public class StockTradesWriter {
             System.exit(1);
         }
 
-        KinesisAsyncClient kinesisClient = KinesisClientUtil.createKinesisAsyncClient(KinesisAsyncClient.builder().region(region));
+        KinesisAsyncClient kinesisClient = KinesisClientUtil
+                .createKinesisAsyncClient(
+                        KinesisAsyncClient.builder()
+                                .endpointOverride(new URI("http://localhost:4566"))
+                                .region(region)
+                );
 
         // Validate that the stream exists and is active
         validateStream(kinesisClient, streamName);
